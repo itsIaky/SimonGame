@@ -1,5 +1,6 @@
 Layout structure:
 
+```
   ┌──────────────────────────────┐
   │             │ SequenceDisplay│ 
   │ GameMatrix  │  (takes most   │
@@ -8,9 +9,11 @@ Layout structure:
   │   full      │  GameButtons   │
   │   height)   │ (minimal space)│
   └──────────────────────────────┘
+```
 
-Portrait mode (unchanged):
+Portrait mode:
 
+```
  ┌──────────────┐
  │  GameMatrix  │ ← 4/5 of space
  ├──────────────┤
@@ -18,3 +21,4 @@ Portrait mode (unchanged):
  ├──────────────┤
  │ GameButtons  │ ← Bottom
  └──────────────┘
+```
