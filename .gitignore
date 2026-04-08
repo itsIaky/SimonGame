@@ -1,0 +1,34 @@
+*.iml
+local.properties
+.kotlin/
+
+# Ignore everything in .idea
+.idea/*
+
+# keep project settings
+!.idea/codeStyles
+!.idea/codeStyles/*
+!.idea/inspectionProfiles
+!.idea/inspectionProfiles/*
+!.idea/misc.xml
+!.idea/vcs.xml
+!.idea/runConfigurations
+
+# Gradle
+.gradle/
+build/
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs
+*.aab
+*.apk
+output-metadata.json
+
+# Log/OS/editor files
+.DS_Store
+*.log
+Thumbs.db
