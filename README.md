@@ -1,4 +1,14 @@
-Layout structure:
+#Development device information:
+Virtual device (not tested on a physical device)
+Medium phone
+Anroid 16 ("Baklava") amr64
+API level 36 (24+)
+
+#Other informations:
+Used Jetpack Compose
+
+
+##Layout structure:
 
 ```
   ┌──────────────────────────────┐
@@ -11,7 +21,7 @@ Layout structure:
   └──────────────────────────────┘
 ```
 
-Portrait mode:
+##Portrait mode:
 
 ```
  ┌──────────────┐
