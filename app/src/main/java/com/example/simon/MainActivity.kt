@@ -13,6 +13,10 @@ import androidx.compose.ui.Modifier
 import com.example.simon.ui.theme.SimonTheme
 import java.util.Locale
 
+// MainActivity is the entry point of the app
+// overrides the attachBaseContext method to set the app's locale based on the system language (english is default).
+// sets the content view to the NavigationStack composable
+// which is responsible for handling the navigation between screens
 class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
         val systemLanguage = Locale.getDefault().language

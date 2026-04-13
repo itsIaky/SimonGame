@@ -9,6 +9,8 @@ import androidx.navigation.compose.rememberNavController
 
 @Composable
 fun NavigationStack(modifier: Modifier = Modifier) {
+    // Create a NavController to manage navigation between screens
+    // Create ViewModel instances for both GameScreen and ScoreScreen to safe state across navigation
     val navController = rememberNavController()
     val gameViewModel : GameViewModel = viewModel()
     val scoreViewModel : ScoreViewModel = viewModel()
@@ -16,11 +18,12 @@ fun NavigationStack(modifier: Modifier = Modifier) {
     NavHost(navController = navController, startDestination = Screen.Game.route) {
         composable(route = Screen.Game.route) {
             GameScreen(
-                navController = navController,
                 viewModel = gameViewModel,
                 modifier = modifier,
-                sharedViewModel = scoreViewModel,
+                // onNavigateToScore is a lambda function that will be called when the user finishes a game and wants to navigate to the ScoreScreen
                 onNavigateToScore = {
+                    scoreViewModel.addPlayedGameSequence(gameViewModel.getUserSequence())
+                    gameViewModel.clearUserSequence()
                     navController.navigate(Screen.Score.route)
                 }
             )
@@ -29,9 +32,9 @@ fun NavigationStack(modifier: Modifier = Modifier) {
             route = Screen.Score.route,
         ) {
             ScoreScreen(
-                navController = navController,
-                modifier = Modifier,
-                viewModel = scoreViewModel)
+                modifier = modifier,
+                viewModel = scoreViewModel
+            )
         }
     }
 }
