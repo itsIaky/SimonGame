@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -23,42 +24,48 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 
 class ScoreViewModel : ViewModel() {
-    private val playedGamesSequence = mutableStateListOf<List<Char>>()
+    private val playedGamesSequence = mutableStateListOf<Score>()
 
-    fun addPlayedGameSequence(gameSequence: List<Char>) {
-        playedGamesSequence.add(gameSequence)
+    fun addPlayedGameSequence(gameScore: Score) {
+        playedGamesSequence.add(gameScore)
     }
 
-    fun getPlayedGamesSequence(): List<List<Char>> {
+    fun getPlayedGamesSequence(): List<Score> {
         return playedGamesSequence.toList()
     }
 }
 
 @Composable
-fun ScoreScreen(modifier: Modifier = Modifier, viewModel: ScoreViewModel) {
+fun ScoreScreen(modifier: Modifier = Modifier, viewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
         val configuration = LocalConfiguration.current
 
         when (configuration.orientation) {
             Configuration.ORIENTATION_LANDSCAPE -> {
-                LandscapeScoreLayout(modifier, viewModel)
+                LandscapeScoreLayout(modifier, viewModel, onNavigateToGame)
             }
             else -> {
-                PortraitScoreLayout(modifier, viewModel)
+                PortraitScoreLayout(modifier, viewModel, onNavigateToGame)
             }
         }
 }
 
 @Composable
-fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel) {
+fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -70,11 +77,19 @@ fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel) {
                 .weight(1f),
             scoreViewModel = scoreViewModel,
         )
+        Button(
+            modifier = Modifier,
+            onClick = {
+                onNavigateToGame()
+            }
+        ) {
+            Text(stringResource(R.string.play_button))
+        }
     }
 }
 
 @Composable
-fun LandscapeScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel) {
+fun LandscapeScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
     Column(
         modifier = modifier
             .fillMaxSize(),
@@ -88,6 +103,14 @@ fun LandscapeScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel) {
                 .weight(1f),
             scoreViewModel = scoreViewModel,
         )
+        Button(
+            modifier = Modifier,
+            onClick = {
+                onNavigateToGame()
+            }
+        ) {
+            Text(stringResource(R.string.play_button))
+        }
     }
 }
 
@@ -120,8 +143,9 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel) {
         scoreViewModel.getPlayedGamesSequence().forEach { gameSequence ->
             PlayedGameText(
                 modifier = Modifier,
-                numberSquaresPressed = gameSequence.size,
-                gameSequence = gameSequence
+                maxScore = gameSequence.getMaxCorrectSequence(),
+                gameSequence = gameSequence.getPlayedGamesSequence(),
+                errorPosition = gameSequence.getErrorPosition()
             )
         }
     }
@@ -147,7 +171,7 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel) {
 // 1) the number of squares pressed
 // 2) the sequence of colors pressed (truncated with dots if too long)
 @Composable
-fun PlayedGameText(modifier: Modifier, numberSquaresPressed : Int, gameSequence: List<Char>) {
+fun PlayedGameText(modifier: Modifier, maxScore : Int, gameSequence: List<Char>, errorPosition: Int) {
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -163,7 +187,7 @@ fun PlayedGameText(modifier: Modifier, numberSquaresPressed : Int, gameSequence:
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "$numberSquaresPressed",
+                text = "$maxScore",
                 modifier = modifier
                     .wrapContentSize(Alignment.CenterStart)
                     .padding(vertical = 8.dp)
@@ -173,6 +197,7 @@ fun PlayedGameText(modifier: Modifier, numberSquaresPressed : Int, gameSequence:
                 thickness = 1.dp,
 
             )
+            /*
             Text(
                 text = gameSequence.joinToString(", "),
                 modifier = modifier
@@ -183,6 +208,38 @@ fun PlayedGameText(modifier: Modifier, numberSquaresPressed : Int, gameSequence:
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Start
             )
+             */
+            TwoColorText(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .weight(9f),
+                gameSequenceString = gameSequence.joinToString(", "),
+                errorPosition = errorPosition
+            )
         }
     }
+}
+
+@Composable
+fun TwoColorText(modifier: Modifier,
+                 gameSequenceString: String,
+                 errorPosition: Int
+) {
+    val split = errorPosition.coerceIn(0, gameSequenceString.length)
+
+    Text(
+        modifier = modifier,
+        text = buildAnnotatedString {
+            withStyle(style = SpanStyle(brush = SolidColor(Color.Black))) {
+                append(gameSequenceString.take(split))      // first x chars
+            }
+            withStyle(style = SpanStyle(color = Color.Red)) {
+                append(gameSequenceString.drop(split))      // remaining chars
+            }
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Start
+    )
 }

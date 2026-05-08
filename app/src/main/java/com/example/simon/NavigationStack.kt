@@ -1,5 +1,6 @@
 package com.example.simon
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -15,16 +16,24 @@ fun NavigationStack(modifier: Modifier = Modifier) {
     val gameViewModel : GameViewModel = viewModel()
     val scoreViewModel : ScoreViewModel = viewModel()
 
-    NavHost(navController = navController, startDestination = Screen.Game.route) {
+    NavHost(navController = navController, startDestination = Screen.Score.route) {
         composable(route = Screen.Game.route) {
             GameScreen(
                 viewModel = gameViewModel,
                 modifier = modifier,
                 // onNavigateToScore is a lambda function that will be called when the user finishes a game and wants to navigate to the ScoreScreen
                 onNavigateToScore = {
-                    scoreViewModel.addPlayedGameSequence(gameViewModel.getUserSequence())
-                    gameViewModel.clearUserSequence()
-                    navController.navigate(Screen.Score.route)
+                    if (!gameViewModel.isPresentingSequence) {
+                        scoreViewModel.addPlayedGameSequence(
+                            gameScore = Score(
+                                playedGamesSequence = gameViewModel.getUserSequence(),
+                                maxCorrectSequence = gameViewModel.getGameSequence().size -1,
+                                errorPosition = gameViewModel.getCurrentStep()
+                                )
+                        )
+                        gameViewModel.clearUserSequence()
+                        navController.navigate(Screen.Score.route)
+                    }
                 }
             )
         }
@@ -33,8 +42,18 @@ fun NavigationStack(modifier: Modifier = Modifier) {
         ) {
             ScoreScreen(
                 modifier = modifier,
-                viewModel = scoreViewModel
+                viewModel = scoreViewModel,
+                onNavigateToGame = {
+                    Log.i("NavigationStack", "Navigating to GameScreen")
+                    navController.navigate(Screen.Game.route)
+                }
             )
+        }
+        composable(route = Screen.Details.route
+        ) {
+            //DetailsScreen(
+            //    modifier = modifier
+            //)
         }
     }
 }

@@ -4,4 +4,8 @@
     <string name="clear_button">Cancella</string>
     <string name="finish_game_button">Fine Partita</string>
     <string name="sequence_text">Sequenza: %1$s</string>
+    <string name="start_game_button">Avvia partita</string>
+    <string name="pause_button">Pausa</string>
+    <string name="play_button">Gioca</string>
+    <string name="resume_button">Riprendi</string>
 </resources>

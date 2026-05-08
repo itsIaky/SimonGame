@@ -3,4 +3,8 @@
     <string name="clear_button">Clear</string>
     <string name="finish_game_button">Finish Game</string>
     <string name="sequence_text">Sequence: %1$s</string>
+    <string name="start_game_button">Start Game</string>
+    <string name="pause_button">Pause</string>
+    <string name="play_button">Play</string>
+    <string name="resume_button">Resume</string>
 </resources>
