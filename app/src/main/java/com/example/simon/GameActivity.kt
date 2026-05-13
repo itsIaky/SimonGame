@@ -1,6 +1,7 @@
 package com.example.simon
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -54,7 +55,7 @@ class GameViewModel : ViewModel() {
         currentStep = 0
     }
 
-    fun increseStep() {
+    fun increaseStep() {
         currentStep++
     }
 
@@ -64,6 +65,17 @@ class GameViewModel : ViewModel() {
     // be of any length (usually the sequence gets longer with each round?? max?? min??)
     // regenerated only when in the ScoreActivity the back_button is pressed
     private val gameSequence = mutableStateListOf<Char>()
+
+    fun reset() {
+        clearGameSequence()
+        clearUserSequence()
+        stopPresentation()
+        currentStep = 0
+        isGameActive = false
+        isGamePaused = false
+        isPresentingSequence = false
+        failed = false
+    }
 
     fun generateGameCharacter(): Char {
         return when ((1..6).random()) {
@@ -123,7 +135,7 @@ class GameViewModel : ViewModel() {
     var failed by mutableStateOf(false)
 
     fun nextRound() {
-        gameSequence.add(generateGameCharacter())
+        addToGameSequence(gameCharacter = generateGameCharacter())
         presentSequence()
     }
 
@@ -188,6 +200,10 @@ class GameViewModel : ViewModel() {
 // which decides which layout to show based on the device orientation
 @Composable
 fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
+    BackHandler {
+        onNavigateToScore()
+    }
+
     val configuration = LocalConfiguration.current
 
     when (configuration.orientation) {
@@ -204,7 +220,7 @@ fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel, onNaviga
 fun PortraitLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     Column(modifier = modifier.fillMaxSize()) {
         Title(modifier = Modifier.wrapContentHeight().align(Alignment.CenterHorizontally), text = stringResource(R.string.app_name))
-        GameMatrix(Modifier.weight(4f), viewModel)
+        GameMatrix(Modifier.weight(4f), viewModel, onNavigateToScore)
         SequenceDisplay(Modifier.weight(1f), viewModel)
         GameButtons(Modifier.wrapContentHeight(), viewModel, onNavigateToScore)
     }
@@ -229,7 +245,7 @@ fun LandscapeLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onN
                 .fillMaxWidth(),
         ) {
             // Left: GameMatrix takes full height
-            GameMatrix(Modifier.weight(1f), viewModel)
+            GameMatrix(Modifier.weight(1f), viewModel, onNavigateToScore)
 
             // Right: SequenceDisplay on top, GameButtons at bottom
             Column(modifier = Modifier.weight(1f)) {
@@ -242,19 +258,19 @@ fun LandscapeLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onN
 
 // This is the function that creates the matrix of colored buttons
 @Composable
-fun GameMatrix(modifier: Modifier = Modifier, viewModel: GameViewModel) {
+fun GameMatrix(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Red, 'R', Modifier.weight(1f), viewModel)
-            ColorButton(Color.Green, 'G', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Red, 'R', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Green, 'G', Modifier.weight(1f), viewModel, onNavigateToScore)
         }
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Blue, 'B', Modifier.weight(1f), viewModel)
-            ColorButton(Color.Magenta, 'M', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Blue, 'B', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Magenta, 'M', Modifier.weight(1f), viewModel, onNavigateToScore)
         }
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Yellow, 'Y', Modifier.weight(1f), viewModel)
-            ColorButton(Color.Cyan, 'C', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Yellow, 'Y', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Cyan, 'C', Modifier.weight(1f), viewModel, onNavigateToScore)
         }
     }
 }
@@ -263,7 +279,7 @@ fun GameMatrix(modifier: Modifier = Modifier, viewModel: GameViewModel) {
 // This is then used in the matrix of buttons
 // When the button is pressed, it adds the corresponding character to the user sequence in the GameViewModel
 @Composable
-fun ColorButton(color: Color, char : Char , modifier: Modifier, viewModel: GameViewModel) {
+fun ColorButton(color: Color, char : Char , modifier: Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     val isLit = viewModel.highlightedChar == char
     val shownColor = if (isLit) lerp(color, Color.White, 0.45f) else color
 
@@ -273,9 +289,9 @@ fun ColorButton(color: Color, char : Char , modifier: Modifier, viewModel: GameV
                 // If the game is not active, has failed, is paused, or is presenting the sequence, ignore button presses
                 return@Button
             }
-            viewModel.addToUserSequence(char)
-            if (viewModel.checkUserSequence(char)) {
-                    viewModel.increseStep()
+            viewModel.addToUserSequence(color = char)
+            if (viewModel.checkUserSequence(character = char)) {
+                    viewModel.increaseStep()
                 if (viewModel.getUserSequence().size == viewModel.getGameSequence().size) {
                     // User completed the sequence correctly, move to next round
                     viewModel.resetStep()
@@ -351,6 +367,7 @@ fun GameButtons(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavig
                 viewModel.isPresentingSequence = true
                 viewModel.failed = false
                 viewModel.isGamePaused = false
+                viewModel.resumeGame()
                 viewModel.nextRound() // starts the game with the first round
             },
             modifier = Modifier.weight(1f).padding(end = 8.dp),

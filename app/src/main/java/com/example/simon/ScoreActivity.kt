@@ -1,6 +1,7 @@
 package com.example.simon
 
 import android.content.res.Configuration
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -48,24 +49,38 @@ class ScoreViewModel : ViewModel() {
     fun getPlayedGamesSequence(): List<Score> {
         return playedGamesSequence.toList()
     }
+
+    fun clearPlayedGamesSequence() {
+        playedGamesSequence.clear()
+    }
 }
 
 @Composable
-fun ScoreScreen(modifier: Modifier = Modifier, viewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
+fun ScoreScreen(
+    modifier: Modifier = Modifier,
+    viewModel: ScoreViewModel,
+    onNavigateToGame: () -> Unit = {},
+    onNavigateToDetails: (Int) -> Unit = {}
+) {
         val configuration = LocalConfiguration.current
 
         when (configuration.orientation) {
             Configuration.ORIENTATION_LANDSCAPE -> {
-                LandscapeScoreLayout(modifier, viewModel, onNavigateToGame)
+                LandscapeScoreLayout(modifier, viewModel, onNavigateToGame, onNavigateToDetails)
             }
             else -> {
-                PortraitScoreLayout(modifier, viewModel, onNavigateToGame)
+                PortraitScoreLayout(modifier, viewModel, onNavigateToGame, onNavigateToDetails)
             }
         }
 }
 
 @Composable
-fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
+fun PortraitScoreLayout(
+    modifier: Modifier,
+    scoreViewModel: ScoreViewModel,
+    onNavigateToGame: () -> Unit = {},
+    onNavigateToDetails: (Int) -> Unit = {}
+) {
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -76,6 +91,7 @@ fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNa
                 .fillMaxWidth()
                 .weight(1f),
             scoreViewModel = scoreViewModel,
+            onNavigateToDetails = onNavigateToDetails
         )
         Button(
             modifier = Modifier,
@@ -89,7 +105,12 @@ fun PortraitScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNa
 }
 
 @Composable
-fun LandscapeScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToGame: () -> Unit = {}) {
+fun LandscapeScoreLayout(
+    modifier: Modifier,
+    scoreViewModel: ScoreViewModel,
+    onNavigateToGame: () -> Unit = {},
+    onNavigateToDetails: (Int) -> Unit = {}
+) {
     Column(
         modifier = modifier
             .fillMaxSize(),
@@ -102,6 +123,7 @@ fun LandscapeScoreLayout(modifier: Modifier, scoreViewModel: ScoreViewModel, onN
                 .fillMaxWidth()
                 .weight(1f),
             scoreViewModel = scoreViewModel,
+            onNavigateToDetails = onNavigateToDetails
         )
         Button(
             modifier = Modifier,
@@ -129,7 +151,7 @@ fun Title(modifier: Modifier, text: String) {
 }
 
 @Composable
-fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel) {
+fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToDetails: (Int) -> Unit) {
     val scrollState = rememberScrollState()
     val showProgress by remember {
         derivedStateOf { scrollState.maxValue > 0 }
@@ -140,12 +162,13 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel) {
             .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        scoreViewModel.getPlayedGamesSequence().forEach { gameSequence ->
+        scoreViewModel.getPlayedGamesSequence().forEachIndexed { index, gameSequence ->
             PlayedGameText(
                 modifier = Modifier,
                 maxScore = gameSequence.getMaxCorrectSequence(),
                 gameSequence = gameSequence.getPlayedGamesSequence(),
-                errorPosition = gameSequence.getErrorPosition()
+                errorPosition = gameSequence.getErrorPosition(),
+                onClick = { onNavigateToDetails(index) }
             )
         }
     }
@@ -171,12 +194,19 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel) {
 // 1) the number of squares pressed
 // 2) the sequence of colors pressed (truncated with dots if too long)
 @Composable
-fun PlayedGameText(modifier: Modifier, maxScore : Int, gameSequence: List<Char>, errorPosition: Int) {
+fun PlayedGameText(
+    modifier: Modifier,
+    maxScore : Int,
+    gameSequence: List<Char>,
+    errorPosition: Int,
+    onClick: () -> Unit
+) {
     Card(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp, horizontal = 24.dp),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        onClick = onClick
     ) {
         Row(
             modifier = modifier
@@ -214,7 +244,7 @@ fun PlayedGameText(modifier: Modifier, maxScore : Int, gameSequence: List<Char>,
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
                     .weight(9f),
-                gameSequenceString = gameSequence.joinToString(", "),
+                gameSequenceString = gameSequence,
                 errorPosition = errorPosition
             )
         }
@@ -223,19 +253,23 @@ fun PlayedGameText(modifier: Modifier, maxScore : Int, gameSequence: List<Char>,
 
 @Composable
 fun TwoColorText(modifier: Modifier,
-                 gameSequenceString: String,
+                 gameSequenceString: List<Char>,
                  errorPosition: Int
 ) {
-    val split = errorPosition.coerceIn(0, gameSequenceString.length)
+    val split = errorPosition.coerceIn(0, gameSequenceString.size)
+    Log.i("TwoColorText", "split: $split, errorPosition: $errorPosition, gameSequenceString: ${gameSequenceString.joinToString(", ")}")
 
     Text(
         modifier = modifier,
         text = buildAnnotatedString {
             withStyle(style = SpanStyle(brush = SolidColor(Color.Black))) {
-                append(gameSequenceString.take(split))      // first x chars
+                append(gameSequenceString.take(split).joinToString(", "))      // first x chars
+            }
+            if (split < gameSequenceString.size) {
+                 if (split > 0) append(", ") // add a comma if there are characters before the error position
             }
             withStyle(style = SpanStyle(color = Color.Red)) {
-                append(gameSequenceString.drop(split))      // remaining chars
+                append(gameSequenceString.drop(split).joinToString(", "))      // remaining chars
             }
         },
         maxLines = 1,
