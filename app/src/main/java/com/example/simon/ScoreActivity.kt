@@ -1,7 +1,7 @@
 package com.example.simon
 
+import android.app.Application
 import android.content.res.Configuration
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -19,14 +19,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -37,21 +36,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 
-class ScoreViewModel : ViewModel() {
-    private val playedGamesSequence = mutableStateListOf<Score>()
+class ScoreViewModel(application: Application) : AndroidViewModel(application) {
+    private val scoreRepository = (application as SimonApplication).scoreRepository
 
-    fun addPlayedGameSequence(gameScore: Score) {
-        playedGamesSequence.add(gameScore)
-    }
+    val playedGames: StateFlow<List<Score>> = scoreRepository.playedGames
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
-    fun getPlayedGamesSequence(): List<Score> {
-        return playedGamesSequence.toList()
-    }
-
-    fun clearPlayedGamesSequence() {
-        playedGamesSequence.clear()
+    fun observePlayedGameById(scoreId: Long): Flow<Score?> {
+        return scoreRepository.observePlayedGameById(scoreId)
     }
 }
 
@@ -60,26 +63,27 @@ fun ScoreScreen(
     modifier: Modifier = Modifier,
     viewModel: ScoreViewModel,
     onNavigateToGame: () -> Unit = {},
-    onNavigateToDetails: (Int) -> Unit = {}
+    onNavigateToDetails: (Long) -> Unit = {}
 ) {
-        val configuration = LocalConfiguration.current
+    val configuration = LocalConfiguration.current
+    val playedGames by viewModel.playedGames.collectAsState()
 
-        when (configuration.orientation) {
-            Configuration.ORIENTATION_LANDSCAPE -> {
-                LandscapeScoreLayout(modifier, viewModel, onNavigateToGame, onNavigateToDetails)
-            }
-            else -> {
-                PortraitScoreLayout(modifier, viewModel, onNavigateToGame, onNavigateToDetails)
-            }
+    when (configuration.orientation) {
+        Configuration.ORIENTATION_LANDSCAPE -> {
+            LandscapeScoreLayout(modifier, playedGames, onNavigateToGame, onNavigateToDetails)
         }
+        else -> {
+            PortraitScoreLayout(modifier, playedGames, onNavigateToGame, onNavigateToDetails)
+        }
+    }
 }
 
 @Composable
 fun PortraitScoreLayout(
     modifier: Modifier,
-    scoreViewModel: ScoreViewModel,
+    playedGames: List<Score>,
     onNavigateToGame: () -> Unit = {},
-    onNavigateToDetails: (Int) -> Unit = {}
+    onNavigateToDetails: (Long) -> Unit = {}
 ) {
     Column(
         modifier = modifier.fillMaxSize(),
@@ -90,7 +94,7 @@ fun PortraitScoreLayout(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            scoreViewModel = scoreViewModel,
+            playedGames = playedGames,
             onNavigateToDetails = onNavigateToDetails
         )
         Button(
@@ -107,22 +111,21 @@ fun PortraitScoreLayout(
 @Composable
 fun LandscapeScoreLayout(
     modifier: Modifier,
-    scoreViewModel: ScoreViewModel,
+    playedGames: List<Score>,
     onNavigateToGame: () -> Unit = {},
-    onNavigateToDetails: (Int) -> Unit = {}
+    onNavigateToDetails: (Long) -> Unit = {}
 ) {
     Column(
         modifier = modifier
             .fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
-
     ) {
         Title(modifier = Modifier, text = "Played Games")
         ScoreList(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            scoreViewModel = scoreViewModel,
+            playedGames = playedGames,
             onNavigateToDetails = onNavigateToDetails
         )
         Button(
@@ -136,8 +139,6 @@ fun LandscapeScoreLayout(
     }
 }
 
-// This composable is used to display the title of the screen
-// used in both game and score screen
 @Composable
 fun Title(modifier: Modifier, text: String) {
     Text(
@@ -151,7 +152,7 @@ fun Title(modifier: Modifier, text: String) {
 }
 
 @Composable
-fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToDetails: (Int) -> Unit) {
+fun ScoreList(modifier: Modifier, playedGames: List<Score>, onNavigateToDetails: (Long) -> Unit) {
     val scrollState = rememberScrollState()
     val showProgress by remember {
         derivedStateOf { scrollState.maxValue > 0 }
@@ -162,13 +163,13 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToDe
             .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        scoreViewModel.getPlayedGamesSequence().forEachIndexed { index, gameSequence ->
+        playedGames.forEach { score ->
             PlayedGameText(
                 modifier = Modifier,
-                maxScore = gameSequence.getMaxCorrectSequence(),
-                gameSequence = gameSequence.getPlayedGamesSequence(),
-                errorPosition = gameSequence.getErrorPosition(),
-                onClick = { onNavigateToDetails(index) }
+                maxScore = score.maxCorrectSequence,
+                gameSequence = score.playedGameSequence,
+                errorPosition = score.errorPosition,
+                onClick = { onNavigateToDetails(score.id) }
             )
         }
     }
@@ -178,7 +179,7 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToDe
             progress = {
                 val max = scrollState.maxValue
                 if (max == 0) 0f
-                else (scrollState.value.toFloat() / max).coerceIn(0f, 1f) // computes normalized progress between 0 and 1
+                else (scrollState.value.toFloat() / max).coerceIn(0f, 1f)
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -189,14 +190,10 @@ fun ScoreList(modifier: Modifier, scoreViewModel: ScoreViewModel, onNavigateToDe
     }
 }
 
-// Display a card with the details of each played game
-// displaying:
-// 1) the number of squares pressed
-// 2) the sequence of colors pressed (truncated with dots if too long)
 @Composable
 fun PlayedGameText(
     modifier: Modifier,
-    maxScore : Int,
+    maxScore: Int,
     gameSequence: List<Char>,
     errorPosition: Int,
     onClick: () -> Unit
@@ -223,22 +220,7 @@ fun PlayedGameText(
                     .padding(vertical = 8.dp)
                     .weight(1f)
             )
-            VerticalDivider(
-                thickness = 1.dp,
-
-            )
-            /*
-            Text(
-                text = gameSequence.joinToString(", "),
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .weight(9f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Start
-            )
-             */
+            VerticalDivider(thickness = 1.dp)
             TwoColorText(
                 modifier = modifier
                     .fillMaxWidth()
@@ -252,24 +234,24 @@ fun PlayedGameText(
 }
 
 @Composable
-fun TwoColorText(modifier: Modifier,
-                 gameSequenceString: List<Char>,
-                 errorPosition: Int
+fun TwoColorText(
+    modifier: Modifier,
+    gameSequenceString: List<Char>,
+    errorPosition: Int
 ) {
     val split = errorPosition.coerceIn(0, gameSequenceString.size)
-    Log.i("TwoColorText", "split: $split, errorPosition: $errorPosition, gameSequenceString: ${gameSequenceString.joinToString(", ")}")
 
     Text(
         modifier = modifier,
         text = buildAnnotatedString {
-            withStyle(style = SpanStyle(brush = SolidColor(Color.Black))) {
-                append(gameSequenceString.take(split).joinToString(", "))      // first x chars
+            withStyle(style = SpanStyle(color = Color.Black)) {
+                append(gameSequenceString.take(split).joinToString(", "))
             }
-            if (split < gameSequenceString.size) {
-                 if (split > 0) append(", ") // add a comma if there are characters before the error position
+            if (split > 0 && split < gameSequenceString.size) {
+                append(", ")
             }
             withStyle(style = SpanStyle(color = Color.Red)) {
-                append(gameSequenceString.drop(split).joinToString(", "))      // remaining chars
+                append(gameSequenceString.drop(split).joinToString(", "))
             }
         },
         maxLines = 1,

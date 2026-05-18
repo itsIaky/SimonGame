@@ -47,20 +47,20 @@ private fun DetailsContent(modifier: Modifier, score: Score) {
     ) {
         Title(modifier = Modifier.fillMaxWidth(), text = "Game Details")
         Text(
-            text = "Max correct sequence: ${score.getMaxCorrectSequence()}",
+            text = "Max correct sequence: ${score.maxCorrectSequence}",
             modifier = Modifier.padding(top = 8.dp),
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Error position: ${score.getErrorPosition()}",
+            text = "Error position: ${score.errorPosition}",
             modifier = Modifier.padding(top = 8.dp)
         )
         Text(
-            text = "Game sequence: ${score.getPlayedGamesSequence().joinToString(separator = ", ")}",
+            text = "Game sequence: ${score.playedGameSequence.joinToString(separator = ", ")}",
             modifier = Modifier.padding(top = 8.dp)
         )
         Text(
-            text = "User sequence: ${score.getPlayedUserSequence().joinToString(separator = ", ")}",
+            text = "User sequence: ${score.playedUserSequence.joinToString(separator = ", ")}",
             modifier = Modifier.padding(top = 8.dp)
         )
     }

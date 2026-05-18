@@ -1,5 +1,6 @@
 package com.example.simon
 
+import android.app.Application
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
@@ -30,54 +31,130 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.min
 
-// ViewModel should survive to screen rotations
-class GameViewModel : ViewModel() {
-    // This holds the user input sequence
+sealed interface GameNavigationEvent {
+    data object NavigateToScore : GameNavigationEvent
+}
+
+class GameViewModel(application: Application) : AndroidViewModel(application) {
+    private val scoreRepository = (application as SimonApplication).scoreRepository
+
     private val userSequence = mutableStateListOf<Char>()
-
-    private var currentStep = 0
-
-    fun getCurrentStep(): Int {
-        return currentStep
-    }
-
-    fun resetStep() {
-        currentStep = 0
-    }
-
-    fun increaseStep() {
-        currentStep++
-    }
-
-    // This should be generated randomly in a real game
-    // The sequence can:
-    // contain duplicates
-    // be of any length (usually the sequence gets longer with each round?? max?? min??)
-    // regenerated only when in the ScoreActivity the back_button is pressed
     private val gameSequence = mutableStateListOf<Char>()
+    private var currentStep = 0
+    private var isNavigatingToScore = false
+
+    var isGameActive by mutableStateOf(false)
+    var isGamePaused by mutableStateOf(false)
+    var isPresentingSequence by mutableStateOf(false)
+    var failed by mutableStateOf(false)
+    var highlightedChar by mutableStateOf<Char?>(null)
+
+    private val pauseFlow = MutableStateFlow(false)
+    private var playbackJob: Job? = null
+
+    private val _navigationEvents = MutableSharedFlow<GameNavigationEvent>(extraBufferCapacity = 1)
+    val navigationEvents: SharedFlow<GameNavigationEvent> = _navigationEvents.asSharedFlow()
+
+    fun getGameSequence(): List<Char> = gameSequence.toList()
+
+    fun getUserSequence(): List<Char> = userSequence.toList()
+
+    fun startGame() {
+        currentStep = 0
+        userSequence.clear()
+        gameSequence.clear()
+        isGameActive = true
+        isPresentingSequence = true
+        failed = false
+        isGamePaused = false
+        isNavigatingToScore = false
+        resumeGame()
+        nextRound()
+    }
 
     fun reset() {
-        clearGameSequence()
-        clearUserSequence()
+        gameSequence.clear()
+        userSequence.clear()
         stopPresentation()
         currentStep = 0
         isGameActive = false
         isGamePaused = false
         isPresentingSequence = false
         failed = false
+        isNavigatingToScore = false
     }
 
-    fun generateGameCharacter(): Char {
+    fun onColorPressed(char: Char) {
+        if (!isGameActive || failed || isGamePaused || isPresentingSequence) {
+            return
+        }
+
+        userSequence.add(char)
+        if (isExpectedInput(char)) {
+            currentStep++
+            if (userSequence.size == gameSequence.size) {
+                currentStep = 0
+                userSequence.clear()
+                nextRound()
+            }
+            return
+        }
+
+        isGameActive = false
+        failed = true
+    }
+
+    fun requestNavigateToScore() {
+        if (isNavigatingToScore) return
+        isNavigatingToScore = true
+
+        val score = buildScoreForCurrentGame()
+        viewModelScope.launch {
+            if (score != null) {
+                scoreRepository.saveScore(score)
+                userSequence.clear()
+            }
+            _navigationEvents.emit(GameNavigationEvent.NavigateToScore)
+        }
+    }
+
+    private fun buildScoreForCurrentGame(): Score? {
+        if (!isGameActive && !failed) return null
+        if (isPresentingSequence && gameSequence.size == 1) return null
+        if (gameSequence.isEmpty()) return null
+
+        return Score(
+            playedGameSequence = gameSequence.toList(),
+            playedUserSequence = userSequence.toList(),
+            maxCorrectSequence = (gameSequence.size - 1).coerceAtLeast(0),
+            errorPosition = currentStep.coerceIn(0, gameSequence.size)
+        )
+    }
+
+    private fun isExpectedInput(char: Char): Boolean {
+        val expectedChar = gameSequence.getOrNull(currentStep) ?: return false
+        return char == expectedChar
+    }
+
+    private fun nextRound() {
+        gameSequence.add(generateGameCharacter())
+        presentSequence()
+    }
+
+    private fun generateGameCharacter(): Char {
         return when ((1..6).random()) {
             1 -> 'R'
             2 -> 'G'
@@ -87,61 +164,6 @@ class GameViewModel : ViewModel() {
             else -> 'C'
         }
     }
-
-    fun clearGameSequence() {
-        gameSequence.clear()
-    }
-
-    fun addToGameSequence(gameCharacter: Char) {
-        gameSequence.add(gameCharacter)
-    }
-
-    fun getGameSequence(): List<Char> {
-        return gameSequence.toList()
-    }
-
-    fun clearUserSequence() {
-        userSequence.clear()
-    }
-
-    fun addToUserSequence(color: Char) {
-        userSequence.add(color)
-    }
-
-    fun getUserSequence(): List<Char> {
-        return userSequence.toList()
-    }
-
-    fun finishGame(): Boolean {
-        // Logic to finish the game, e.g., check sequence, update score, switch screen, etc.
-        return userSequence == gameSequence
-    }
-
-    fun checkUserSequence(character: Char): Boolean {
-//        // Check if the user sequence is correct so far
-//        for (i in userSequence.indices) {
-//            if (userSequence[i] != gameSequence[i]) {
-//                return false
-//            }
-//        }
-//        return true
-        return character == gameSequence[currentStep]
-    }
-
-    // mutableStateOf is needed to trigger recomposition when the value changes
-    var isGameActive by mutableStateOf(false)
-    var isGamePaused by mutableStateOf(false)
-    var isPresentingSequence by mutableStateOf(false)
-    var failed by mutableStateOf(false)
-
-    fun nextRound() {
-        addToGameSequence(gameCharacter = generateGameCharacter())
-        presentSequence()
-    }
-
-    var highlightedChar by mutableStateOf<Char?>(null)
-    private val pauseFlow = MutableStateFlow(false)
-    private var playbackJob: Job? = null
 
     fun pauseGame() {
         isGamePaused = true
@@ -153,13 +175,13 @@ class GameViewModel : ViewModel() {
         pauseFlow.value = false
     }
 
-    fun stopPresentation() {
+    private fun stopPresentation() {
         playbackJob?.cancel()
         highlightedChar = null
         isPresentingSequence = false
     }
 
-    fun presentSequence() {
+    private fun presentSequence() {
         playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
             isPresentingSequence = true
@@ -168,7 +190,6 @@ class GameViewModel : ViewModel() {
                     awaitIfPaused()
 
                     highlightedChar = c
-                    // play sound for c here
                     pauseAwareDelay(450)
 
                     highlightedChar = null
@@ -196,8 +217,6 @@ class GameViewModel : ViewModel() {
     }
 }
 
-// This is the main composable function for the game screen,
-// which decides which layout to show based on the device orientation
 @Composable
 fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     BackHandler {
@@ -219,8 +238,13 @@ fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel, onNaviga
 @Composable
 fun PortraitLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     Column(modifier = modifier.fillMaxSize()) {
-        Title(modifier = Modifier.wrapContentHeight().align(Alignment.CenterHorizontally), text = stringResource(R.string.app_name))
-        GameMatrix(Modifier.weight(4f), viewModel, onNavigateToScore)
+        Title(
+            modifier = Modifier
+                .wrapContentHeight()
+                .align(Alignment.CenterHorizontally),
+            text = stringResource(R.string.app_name)
+        )
+        GameMatrix(Modifier.weight(4f), viewModel)
         SequenceDisplay(Modifier.weight(1f), viewModel)
         GameButtons(Modifier.wrapContentHeight(), viewModel, onNavigateToScore)
     }
@@ -231,7 +255,6 @@ fun LandscapeLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onN
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
-
     ) {
         Title(
             modifier = Modifier
@@ -241,13 +264,10 @@ fun LandscapeLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onN
         )
 
         Row(
-            modifier = modifier
-                .fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
         ) {
-            // Left: GameMatrix takes full height
-            GameMatrix(Modifier.weight(1f), viewModel, onNavigateToScore)
+            GameMatrix(Modifier.weight(1f), viewModel)
 
-            // Right: SequenceDisplay on top, GameButtons at bottom
             Column(modifier = Modifier.weight(1f)) {
                 SequenceDisplay(Modifier.weight(1f), viewModel)
                 GameButtons(Modifier.wrapContentHeight(), viewModel, onNavigateToScore)
@@ -256,71 +276,45 @@ fun LandscapeLayout(modifier: Modifier = Modifier, viewModel: GameViewModel, onN
     }
 }
 
-// This is the function that creates the matrix of colored buttons
 @Composable
-fun GameMatrix(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
+fun GameMatrix(modifier: Modifier = Modifier, viewModel: GameViewModel) {
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Red, 'R', Modifier.weight(1f), viewModel, onNavigateToScore)
-            ColorButton(Color.Green, 'G', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Red, 'R', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Green, 'G', Modifier.weight(1f), viewModel)
         }
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Blue, 'B', Modifier.weight(1f), viewModel, onNavigateToScore)
-            ColorButton(Color.Magenta, 'M', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Blue, 'B', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Magenta, 'M', Modifier.weight(1f), viewModel)
         }
         Row(modifier = Modifier.weight(1f)) {
-            ColorButton(Color.Yellow, 'Y', Modifier.weight(1f), viewModel, onNavigateToScore)
-            ColorButton(Color.Cyan, 'C', Modifier.weight(1f), viewModel, onNavigateToScore)
+            ColorButton(Color.Yellow, 'Y', Modifier.weight(1f), viewModel)
+            ColorButton(Color.Cyan, 'C', Modifier.weight(1f), viewModel)
         }
     }
 }
 
-// This is the function that creates a colored button with the specified color and character
-// This is then used in the matrix of buttons
-// When the button is pressed, it adds the corresponding character to the user sequence in the GameViewModel
 @Composable
-fun ColorButton(color: Color, char : Char , modifier: Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
+fun ColorButton(color: Color, char: Char, modifier: Modifier, viewModel: GameViewModel) {
     val isLit = viewModel.highlightedChar == char
     val shownColor = if (isLit) lerp(color, Color.White, 0.45f) else color
 
     Button(
         onClick = {
-            if (!viewModel.isGameActive || viewModel.failed || viewModel.isGamePaused || viewModel.isPresentingSequence) {
-                // If the game is not active, has failed, is paused, or is presenting the sequence, ignore button presses
-                return@Button
-            }
-            viewModel.addToUserSequence(color = char)
-            if (viewModel.checkUserSequence(character = char)) {
-                    viewModel.increaseStep()
-                if (viewModel.getUserSequence().size == viewModel.getGameSequence().size) {
-                    // User completed the sequence correctly, move to next round
-                    viewModel.resetStep()
-                    viewModel.clearUserSequence()
-                    viewModel.nextRound()
-                }
-            } else {
-                // User made a mistake, end the game
-                viewModel.isGameActive = false
-                viewModel.failed = true
-                // TODO: Show a message to the user that they lost and navigate to the score screen
-            }
+            viewModel.onColorPressed(char)
         },
-        //enabled = viewModel.isGameActive && !viewModel.faield && !viewModel.isGamePaused && !viewModel.isPresentingSequence,
-        colors = ButtonDefaults.buttonColors( shownColor),
+        colors = ButtonDefaults.buttonColors(shownColor),
         shape = RectangleShape,
         modifier = modifier
             .fillMaxHeight()
             .padding(4.dp)
     ) {
-
     }
 }
 
 @Composable
 fun SequenceDisplay(modifier: Modifier = Modifier, viewModel: GameViewModel) {
-    // creates/keeps scroll state across recomposition
     val scrollState = rememberScrollState()
-    // derived state to determine if we should show the progress bar (only if content is scrollable)
     val showProgress by remember {
         derivedStateOf { scrollState.maxValue > 0 }
     }
@@ -335,13 +329,10 @@ fun SequenceDisplay(modifier: Modifier = Modifier, viewModel: GameViewModel) {
         )
 
         if (showProgress) {
-            // progress value is computed in a lambda (better for frequently changing scroll values)
-            // and constrained between [0f, 1f]
             LinearProgressIndicator(
                 progress = {
                     val max = scrollState.maxValue
-                    if (max == 0) 0f
-                    else (scrollState.value.toFloat() / max).coerceIn(0f, 1f) // computes normalized progress between 0 and 1
+                    if (max == 0) 0f else (scrollState.value.toFloat() / max).coerceIn(0f, 1f)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -352,27 +343,15 @@ fun SequenceDisplay(modifier: Modifier = Modifier, viewModel: GameViewModel) {
     }
 }
 
-// This is the function that creates the buttons at the bottom of the screen (Clear and Finish Game)
-// onNavigateToScore is a lambda that should be called when the Finish Game button is pressed, to navigate to the ScoreActivity
-// Passing the user sequence to the ScoreViewModel and clearing the user sequence in the GameViewModel
 @Composable
 fun GameButtons(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
     Row(modifier = modifier.padding(16.dp)) {
         Button(
             onClick = {
-                viewModel.resetStep()
-                viewModel.clearUserSequence()
-                viewModel.clearGameSequence()
-                viewModel.isGameActive = true
-                viewModel.isPresentingSequence = true
-                viewModel.failed = false
-                viewModel.isGamePaused = false
-                viewModel.resumeGame()
-                viewModel.nextRound() // starts the game with the first round
+                viewModel.startGame()
             },
             modifier = Modifier.weight(1f).padding(end = 8.dp),
             enabled = !viewModel.isGameActive && !viewModel.failed
-
         ) {
             Text(stringResource(R.string.start_game_button))
         }
@@ -384,10 +363,8 @@ fun GameButtons(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavig
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             enabled = viewModel.isGameActive && !viewModel.failed && viewModel.isPresentingSequence
         ) {
-            if(viewModel.isGamePaused)
-                Text(stringResource(R.string.resume_button))
-            else
-                Text(stringResource(R.string.pause_button))
+            if (viewModel.isGamePaused) Text(stringResource(R.string.resume_button))
+            else Text(stringResource(R.string.pause_button))
         }
 
         Button(
