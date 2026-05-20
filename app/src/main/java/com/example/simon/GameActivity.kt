@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -48,7 +49,7 @@ sealed interface GameNavigationEvent {
     data object NavigateToScore : GameNavigationEvent
 }
 
-class GameViewModel(application: Application) : AndroidViewModel(application) {
+class GameViewModel(application: Application, private val savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     // shared repository used to save completed games
     private val scoreRepository = (application as SimonApplication).scoreRepository
 
@@ -82,6 +83,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _navigationEvents = MutableSharedFlow<GameNavigationEvent>(extraBufferCapacity = 1)
     val navigationEvents: SharedFlow<GameNavigationEvent> = _navigationEvents.asSharedFlow()
 
+    companion object {
+        private const val KEY_GAME_SEQUENCE = "game_sequence"
+        private const val KEY_USER_SEQUENCE = "user_sequence"
+        private const val KEY_CURRENT_STEP = "current_step"
+        private const val KEY_IS_GAME_ACTIVE = "is_game_active"
+        private const val KEY_IS_GAME_PAUSED = "is_game_paused"
+        private const val KEY_IS_PRESENTING_SEQUENCE = "is_presenting_sequence"
+        private const val KEY_FAILED = "failed"
+    }
+
+    init {
+        restoreStateFromSavedHandle()
+    }
+
     // read-only copies exposed to UI/composables
     fun getGameSequence(): List<Char> = gameSequence.toList()
     fun getUserSequence(): List<Char> = userSequence.toList()
@@ -111,6 +126,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         isPresentingSequence = false
         failed = false
         isNavigatingToScore = false
+        saveStateToSavedHandle()
     }
 
     // handles a tile press from the player
@@ -128,12 +144,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 currentStep = 0
                 userSequence.clear()
                 nextRound()
+            } else {
+                saveStateToSavedHandle()
             }
             return
         }
 
         isGameActive = false
         failed = true
+        saveStateToSavedHandle()
     }
 
     // called when user wants to leave game and go to score screen
@@ -147,6 +166,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             if (score != null) {
                 scoreRepository.saveScore(score)
                 userSequence.clear()
+                saveStateToSavedHandle()
             }
             _navigationEvents.emit(GameNavigationEvent.NavigateToScore)
         }
@@ -174,6 +194,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun nextRound() {
         gameSequence.add(generateGameCharacter())
+        saveStateToSavedHandle()
         presentSequence()
     }
 
@@ -191,23 +212,27 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun pauseGame() {
         isGamePaused = true
         pauseFlow.value = true
+        saveStateToSavedHandle()
     }
 
     fun resumeGame() {
         isGamePaused = false
         pauseFlow.value = false
+        saveStateToSavedHandle()
     }
 
     private fun stopPresentation() {
         playbackJob?.cancel()
         highlightedChar = null
         isPresentingSequence = false
+        saveStateToSavedHandle()
     }
 
     private fun presentSequence() {
         playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
             isPresentingSequence = true
+            saveStateToSavedHandle()
             try {
                 for (c in gameSequence) {
                     awaitIfPaused()
@@ -221,6 +246,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 highlightedChar = null
                 isPresentingSequence = false
+                saveStateToSavedHandle()
             }
         }
     }
@@ -236,6 +262,50 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             val step = min(remaining, 16L)
             delay(step)
             if (!pauseFlow.value) remaining -= step
+        }
+    }
+
+    private fun saveStateToSavedHandle() {
+        savedStateHandle[KEY_GAME_SEQUENCE] = gameSequence.joinToString(separator = "")
+        savedStateHandle[KEY_USER_SEQUENCE] = userSequence.joinToString(separator = "")
+        savedStateHandle[KEY_CURRENT_STEP] = currentStep
+        savedStateHandle[KEY_IS_GAME_ACTIVE] = isGameActive
+        savedStateHandle[KEY_IS_GAME_PAUSED] = isGamePaused
+        savedStateHandle[KEY_IS_PRESENTING_SEQUENCE] = isPresentingSequence
+        savedStateHandle[KEY_FAILED] = failed
+    }
+
+    // if the presentation was in the middle of showing the sequence
+    // the whole sequence will be shown again
+    private fun restoreStateFromSavedHandle() {
+        val restoredGameSequence = savedStateHandle.get<String>(KEY_GAME_SEQUENCE).orEmpty()
+        val restoredUserSequence = savedStateHandle.get<String>(KEY_USER_SEQUENCE).orEmpty()
+        val restoredCurrentStep = savedStateHandle.get<Int>(KEY_CURRENT_STEP) ?: 0
+        val restoredIsGameActive = savedStateHandle.get<Boolean>(KEY_IS_GAME_ACTIVE) ?: false
+        val restoredIsGamePaused = savedStateHandle.get<Boolean>(KEY_IS_GAME_PAUSED) ?: false
+        val restoredWasPresenting = savedStateHandle.get<Boolean>(KEY_IS_PRESENTING_SEQUENCE) ?: false
+        val restoredFailed = savedStateHandle.get<Boolean>(KEY_FAILED) ?: false
+
+        gameSequence.clear()
+        gameSequence.addAll(restoredGameSequence.toList())
+        userSequence.clear()
+        userSequence.addAll(restoredUserSequence.toList())
+
+        val maxStep = (gameSequence.size - 1).coerceAtLeast(0)
+        currentStep = restoredCurrentStep.coerceIn(0, maxStep)
+
+        isGameActive = restoredIsGameActive
+        isGamePaused = restoredIsGamePaused
+        failed = restoredFailed
+        highlightedChar = null
+        pauseFlow.value = isGamePaused
+        isNavigatingToScore = false
+
+        if (restoredWasPresenting && isGameActive && !failed && gameSequence.isNotEmpty()) {
+            presentSequence()
+        } else {
+            isPresentingSequence = false
+            saveStateToSavedHandle()
         }
     }
 }
