@@ -103,7 +103,7 @@ fun PortraitScoreLayout(
                 onNavigateToGame()
             }
         ) {
-            Text(stringResource(R.string.play_button))
+            Text(stringResource(R.string.play_button_score_screen))
         }
     }
 }
@@ -134,7 +134,7 @@ fun LandscapeScoreLayout(
                 onNavigateToGame()
             }
         ) {
-            Text(stringResource(R.string.play_button))
+            Text(stringResource(R.string.play_button_score_screen))
         }
     }
 }
