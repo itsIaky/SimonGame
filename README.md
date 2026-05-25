@@ -102,12 +102,13 @@
 ## Portrait/Landscape structure:
 
 ```
- ┌──────────────────────────────┐
- │         Game Details         │ ← Title
- ├──────────────────────────────┤
- │ Max correct sequence: ...    │
- │ Error position: ...          │
- │ Game sequence: ...           │
- │ User sequence: ...           │
- └──────────────────────────────┘
+ ┌──────────────────────────────────┐
+ │         Game Details             │ ← Title
+ ├──────────────────────────────────┤
+ │ Max correct sequence: ...        │
+ │ Error position: ...              │
+ │ Game sequence:   User sequence:  │
+ │   ....              .....        │
+ │   ....               ....        │
+ └──────────────────────────────────┘
 ```

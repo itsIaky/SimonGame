@@ -89,7 +89,7 @@ fun PortraitScoreLayout(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Title(modifier = Modifier, text = "Played Games")
+        Title(modifier = Modifier, text = stringResource(R.string.played_games_text_score_screen))
         ScoreList(
             modifier = Modifier
                 .fillMaxWidth()
@@ -120,7 +120,7 @@ fun LandscapeScoreLayout(
             .fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Title(modifier = Modifier, text = "Played Games")
+        Title(modifier = Modifier, text = stringResource(R.string.played_games_text_score_screen))
         ScoreList(
             modifier = Modifier
                 .fillMaxWidth()

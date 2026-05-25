@@ -3,14 +3,17 @@ package com.example.simon
 import android.app.Application
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -61,6 +64,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     // index of the next expected character in gameSequence
     private var currentStep = 0
+    private var presentationStep = 0
 
     // guard to avoid multiple concurrent navigation/save requests
     private var isNavigatingToScore = false
@@ -90,7 +94,9 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         private const val KEY_IS_GAME_ACTIVE = "is_game_active"
         private const val KEY_IS_GAME_PAUSED = "is_game_paused"
         private const val KEY_IS_PRESENTING_SEQUENCE = "is_presenting_sequence"
+        private const val KEY_PRESENTATION_STEP = "presentation_step"
         private const val KEY_FAILED = "failed"
+        private const val RESUME_PRESENTATION_DELAY_MS = 350L
     }
 
     init {
@@ -104,6 +110,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     // starts a new run from a clean state and immediately presents round 1
     fun startGame() {
         currentStep = 0
+        presentationStep = 0
         userSequence.clear()
         gameSequence.clear()
         isGameActive = true
@@ -121,6 +128,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         userSequence.clear()
         stopPresentation()
         currentStep = 0
+        presentationStep = 0
         isGameActive = false
         isGamePaused = false
         isPresentingSequence = false
@@ -194,6 +202,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     private fun nextRound() {
         gameSequence.add(generateGameCharacter())
+        presentationStep = 0
         saveStateToSavedHandle()
         presentSequence()
     }
@@ -225,27 +234,52 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         playbackJob?.cancel()
         highlightedChar = null
         isPresentingSequence = false
+        presentationStep = 0
         saveStateToSavedHandle()
     }
 
-    private fun presentSequence() {
+    private fun presentSequence(startStep: Int = 0, initialDelayMs: Long = 0L) {
         playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
+            val totalSteps = gameSequence.size * 2
+            if (totalSteps == 0) {
+                isPresentingSequence = false
+                presentationStep = 0
+                highlightedChar = null
+                saveStateToSavedHandle()
+                return@launch
+            }
+
             isPresentingSequence = true
+            presentationStep = startStep.coerceIn(0, totalSteps)
+            highlightedChar = null
             saveStateToSavedHandle()
             try {
-                for (c in gameSequence) {
+                if (initialDelayMs > 0) {
+                    pauseAwareDelay(initialDelayMs)
+                }
+
+                var step = presentationStep
+                while (step < totalSteps) {
                     awaitIfPaused()
+                    presentationStep = step
+                    saveStateToSavedHandle()
 
-                    highlightedChar = c
-                    pauseAwareDelay(450)
-
-                    highlightedChar = null
-                    pauseAwareDelay(150)
+                    val index = step / 2
+                    val c = gameSequence[index]
+                    if (step % 2 == 0) {
+                        highlightedChar = c
+                        pauseAwareDelay(450)
+                    } else {
+                        highlightedChar = null
+                        pauseAwareDelay(150)
+                    }
+                    step++
                 }
             } finally {
                 highlightedChar = null
                 isPresentingSequence = false
+                presentationStep = totalSteps
                 saveStateToSavedHandle()
             }
         }
@@ -272,11 +306,12 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         savedStateHandle[KEY_IS_GAME_ACTIVE] = isGameActive
         savedStateHandle[KEY_IS_GAME_PAUSED] = isGamePaused
         savedStateHandle[KEY_IS_PRESENTING_SEQUENCE] = isPresentingSequence
+        savedStateHandle[KEY_PRESENTATION_STEP] = presentationStep
         savedStateHandle[KEY_FAILED] = failed
     }
 
     // if the presentation was in the middle of showing the sequence
-    // the whole sequence will be shown again
+    // replay the last highlighted char after a short resume delay
     private fun restoreStateFromSavedHandle() {
         val restoredGameSequence = savedStateHandle.get<String>(KEY_GAME_SEQUENCE).orEmpty()
         val restoredUserSequence = savedStateHandle.get<String>(KEY_USER_SEQUENCE).orEmpty()
@@ -284,6 +319,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         val restoredIsGameActive = savedStateHandle.get<Boolean>(KEY_IS_GAME_ACTIVE) ?: false
         val restoredIsGamePaused = savedStateHandle.get<Boolean>(KEY_IS_GAME_PAUSED) ?: false
         val restoredWasPresenting = savedStateHandle.get<Boolean>(KEY_IS_PRESENTING_SEQUENCE) ?: false
+        val restoredPresentationStep = savedStateHandle.get<Int>(KEY_PRESENTATION_STEP) ?: 0
         val restoredFailed = savedStateHandle.get<Boolean>(KEY_FAILED) ?: false
 
         gameSequence.clear()
@@ -293,6 +329,8 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
         val maxStep = (gameSequence.size - 1).coerceAtLeast(0)
         currentStep = restoredCurrentStep.coerceIn(0, maxStep)
+        val totalSteps = gameSequence.size * 2
+        presentationStep = restoredPresentationStep.coerceIn(0, totalSteps)
 
         isGameActive = restoredIsGameActive
         isGamePaused = restoredIsGamePaused
@@ -301,8 +339,16 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         pauseFlow.value = isGamePaused
         isNavigatingToScore = false
 
-        if (restoredWasPresenting && isGameActive && !failed && gameSequence.isNotEmpty()) {
-            presentSequence()
+        val adjustedStartStep = when {
+            totalSteps == 0 -> 0
+            presentationStep >= totalSteps -> totalSteps
+            presentationStep % 2 == 1 -> (presentationStep - 1).coerceAtLeast(0)
+            else -> presentationStep
+        }
+        presentationStep = adjustedStartStep
+
+        if (restoredWasPresenting && isGameActive && !failed && gameSequence.isNotEmpty() && presentationStep < totalSteps) {
+            presentSequence(presentationStep, RESUME_PRESENTATION_DELAY_MS)
         } else {
             isPresentingSequence = false
             saveStateToSavedHandle()
@@ -414,23 +460,49 @@ fun SequenceDisplay(modifier: Modifier = Modifier, viewModel: GameViewModel) {
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = stringResource(R.string.sequence_text_game_screen, viewModel.getUserSequence().joinToString(separator = ", ")),
+            text = stringResource(R.string.sequence_text_game_screen),
             modifier = Modifier
-                .padding(24.dp)
-                .verticalScroll(scrollState)
-                .fillMaxWidth(),
+                .padding(horizontal = 24.dp)
+                .padding(top = 8.dp)
         )
-
-        if (showProgress) {
-            LinearProgressIndicator(
-                progress = {
-                    val max = scrollState.maxValue
-                    if (max == 0) 0f else (scrollState.value.toFloat() / max).coerceIn(0f, 1f)
-                },
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .border(1.dp, Color(0xFFBDBDBD), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+                .heightIn(max = 160.dp)
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 8.dp),
+                    .weight(1f, fill = false)
+                    .verticalScroll(scrollState)
+            ) {
+                Text(
+                    text = viewModel.getUserSequence().joinToString(separator = ", "),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (showProgress) {
+                LinearProgressIndicator(
+                    progress = {
+                        val max = scrollState.maxValue
+                        if (max == 0) 0f else (scrollState.value.toFloat() / max).coerceIn(0f, 1f)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+            }
+        }
+        if (viewModel.failed) {
+            Text(
+                text = stringResource(R.string.game_failed_text_game_screen),
+                color = Color.Red,
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 8.dp)
             )
         }
     }

@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Simon</string>
     <string name="finish_game_button">Finish Game</string>
-    <string name="sequence_text_game_screen">Sequence: %1$s</string>
+    <string name="sequence_text_game_screen">Sequence:</string>
     <string name="start_game_button_game_screen">Start Game</string>
     <string name="pause_button_game_screen">Pause</string>
     <string name="play_button_score_screen">Play</string>
@@ -9,6 +9,8 @@
     <string name="game_details_text_detail_screen">Game Details</string>
     <string name="max_correct_sequence_detail_screen">Max correct sequence: %1$s</string>
     <string name="error_position_text_detail_screen">Error position: %1$s</string>
-    <string name="game_sequence_text_detail_screen">Game sequence: %1$s</string>
-    <string name="user_sequence_text_detail_screen">User sequence: %1$s</string>
+    <string name="game_sequence_title_detail_screen">Game sequence:</string>
+    <string name="user_sequence_title_detail_screen">User sequence:</string>
+    <string name="game_failed_text_game_screen">Wrong sequence</string>
+    <string name="played_games_text_score_screen">Played Games</string>
 </resources>
