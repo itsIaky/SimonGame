@@ -2,6 +2,9 @@ package com.example.simon
 
 import android.app.Application
 import android.content.res.Configuration
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
@@ -46,7 +49,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 sealed interface GameNavigationEvent {
     data object NavigateToScore : GameNavigationEvent
@@ -64,12 +69,16 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     // index of the next expected character in gameSequence
     private var currentStep = 0
+    // presentationStep tracks highlight/blank steps to resume sequence playback
     private var presentationStep = 0
 
     // guard to avoid multiple concurrent navigation/save requests
     private var isNavigatingToScore = false
 
-    // UI-observed state flags
+    // isGameActive gates input and scoring for the current run
+    // isGamePaused pauses presentation without resetting the run
+    // isPresentingSequence blocks input while the sequence is animating
+    // failed marks that the user input ended the run
     var isGameActive by mutableStateOf(false)
     var isGamePaused by mutableStateOf(false)
     var isPresentingSequence by mutableStateOf(false)
@@ -78,10 +87,12 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     // currently highlighted tile while presenting the sequence
     var highlightedChar by mutableStateOf<Char?>(null)
 
-    // pauseFlow controls pause/resume
+    // pauseFlow is observed by the presentation coroutine to pause delays
     // playbackJob runs sequence animation
     private val pauseFlow = MutableStateFlow(false)
     private var playbackJob: Job? = null
+    private var inputFlashJob: Job? = null
+    private val toneTracks: Map<Char, AudioTrack> = buildToneTracks()
 
     // internal event bus for one-off navigation events
     private val _navigationEvents = MutableSharedFlow<GameNavigationEvent>(extraBufferCapacity = 1)
@@ -96,11 +107,23 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         private const val KEY_IS_PRESENTING_SEQUENCE = "is_presenting_sequence"
         private const val KEY_PRESENTATION_STEP = "presentation_step"
         private const val KEY_FAILED = "failed"
+
+        private const val TILE_HIGHLIGHT_DURATION_MS = 420L
+        private const val PAUSE_BETWEEN_TONES_MS = 50L
         private const val RESUME_PRESENTATION_DELAY_MS = 350L
+        private const val TONE_SAMPLE_RATE = 44100
+        private const val TONE_DURATION_MS = 420
+        private const val NEXT_SEQUENCE_DELAY_MS = 800L
+        private const val USER_INPUT_FLASH_MS = 420L
     }
 
     init {
         restoreStateFromSavedHandle()
+    }
+
+    override fun onCleared() {
+        toneTracks.values.forEach { track -> track.release() }
+        super.onCleared()
     }
 
     // read-only copies exposed to UI/composables
@@ -145,13 +168,15 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
             return
         }
 
+        flashUserInput(char)
+        playToneForChar(char)
         userSequence.add(char)
         if (isExpectedInput(char)) {
             currentStep++
             if (userSequence.size == gameSequence.size) {
                 currentStep = 0
                 userSequence.clear()
-                nextRound()
+                nextRound(NEXT_SEQUENCE_DELAY_MS)
             } else {
                 saveStateToSavedHandle()
             }
@@ -163,12 +188,15 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         saveStateToSavedHandle()
     }
 
-    // called when user wants to leave game and go to score screen
-    // saves a valid score (if available) and emits navigation event
+    // handles user request to leave game and go to score screen
+    // sets a guard to avoid double navigation then saves a valid score
+    // emits a one-off navigation event after persistence completes
     fun requestNavigateToScore() {
         if (isNavigatingToScore) return
         isNavigatingToScore = true
 
+        stopPresentation()
+        stopAllTonesNow()
         val score = buildScoreForCurrentGame()
         viewModelScope.launch {
             if (score != null) {
@@ -200,11 +228,11 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         return char == expectedChar
     }
 
-    private fun nextRound() {
+    private fun nextRound(initialDelayMs: Long = 0L) {
         gameSequence.add(generateGameCharacter())
         presentationStep = 0
         saveStateToSavedHandle()
-        presentSequence()
+        presentSequence(initialDelayMs = initialDelayMs)
     }
 
     private fun generateGameCharacter(): Char {
@@ -232,6 +260,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     private fun stopPresentation() {
         playbackJob?.cancel()
+        inputFlashJob?.cancel()
         highlightedChar = null
         isPresentingSequence = false
         presentationStep = 0
@@ -252,12 +281,20 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
             isPresentingSequence = true
             presentationStep = startStep.coerceIn(0, totalSteps)
-            highlightedChar = null
             saveStateToSavedHandle()
             try {
                 if (initialDelayMs > 0) {
                     pauseAwareDelay(initialDelayMs)
                 }
+
+                // before the char was set to null before the delay
+                // when the user presses the last tile of a round, flashUserInput() sets highlightedChar = char,
+                // but nextRound() immediately calls presentSequence(initialDelayMs = ....)
+                // which would clear highlightedChar right away
+                // so the “user click highlight” was barely visible or not visible at all
+                highlightedChar = null
+                saveStateToSavedHandle()
+                stopAllTonesForRestart()
 
                 var step = presentationStep
                 while (step < totalSteps) {
@@ -269,10 +306,11 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
                     val c = gameSequence[index]
                     if (step % 2 == 0) {
                         highlightedChar = c
-                        pauseAwareDelay(450)
+                        playToneForChar(c)
+                        pauseAwareDelay(TILE_HIGHLIGHT_DURATION_MS)
                     } else {
                         highlightedChar = null
-                        pauseAwareDelay(150)
+                        pauseAwareDelay(PAUSE_BETWEEN_TONES_MS)
                     }
                     step++
                 }
@@ -281,6 +319,17 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
                 isPresentingSequence = false
                 presentationStep = totalSteps
                 saveStateToSavedHandle()
+            }
+        }
+    }
+
+    private fun flashUserInput(char: Char) {
+        inputFlashJob?.cancel()
+        inputFlashJob = viewModelScope.launch {
+            highlightedChar = char
+            delay(USER_INPUT_FLASH_MS)
+            if (highlightedChar == char) {
+                highlightedChar = null
             }
         }
     }
@@ -299,6 +348,139 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         }
     }
 
+    private fun playToneForChar(char: Char) {
+        val track = toneTracks[char] ?: return
+        stopAllTonesForRestart()
+        track.playbackHeadPosition = 0
+        track.play()
+    }
+
+    // these two methods converge to the same final state
+    // sometimes when playing the tones some time I hear crackling noise (only tested on emulator)
+    // this seems to happen more with the function track.pause() and less with track.stop()
+
+    // one meaningful difference, that I found, are:
+    // 1) hardware resources
+    // - pause "keeps audio hardware acquired"
+    // - stop "releases hardware for others to use"
+    // 2) data in the buffer
+    // - pause "keeps the data in the buffer"
+    // - stop "continues playing the rest of the written buffer unless cleared"
+
+    // from the AudioTrack stop() documentation:
+    // https://developer.android.com/reference/android/media/AudioTrack.html#stop()
+    // "For an immediate stop, use pause(), followed by flush() to discard audio data that hasn't been played back yet.
+
+    // found a similar issue here:
+    // https://stackoverflow.com/questions/22422234/audiotrack-flush-causing-static
+    private fun stopAllTonesForRestart() {
+        toneTracks.values.forEach { track ->
+            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                //track.pause()
+                track.stop()
+            }
+            track.flush()
+            track.playbackHeadPosition = 0
+        }
+    }
+
+    private fun stopAllTonesNow() {
+        toneTracks.values.forEach { track ->
+            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                //track.pause()
+                track.stop()
+            }
+            track.flush()
+            track.playbackHeadPosition = 0
+        }
+    }
+
+    private fun buildToneTracks(): Map<Char, AudioTrack> {
+        return mapOf(
+            'R' to createToneTrack(261.63),
+            'G' to createToneTrack(293.66),
+            'B' to createToneTrack(329.63),
+            'M' to createToneTrack(392.00),
+            'Y' to createToneTrack(440.00),
+            'C' to createToneTrack(523.25),
+        )
+    }
+
+    private fun createToneTrack(frequencyHz: Double): AudioTrack {
+        val buffer = generateToneBuffer(
+            frequencyHz = frequencyHz,
+            durationMs = TONE_DURATION_MS,
+            sampleRate = TONE_SAMPLE_RATE
+        )
+        val minSize = AudioTrack.getMinBufferSize(
+            TONE_SAMPLE_RATE,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        val bufferBytes = buffer.size * 2
+        val safeMinSize = if (minSize > 0) minSize else bufferBytes
+        val format = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(TONE_SAMPLE_RATE)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+            .build()
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(format)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(2*max(bufferBytes, safeMinSize))
+            .build()
+        track.write(buffer, 0, buffer.size)
+        return track
+    }
+
+    private fun generateToneBuffer(
+        frequencyHz: Double,
+        durationMs: Int,
+        sampleRate: Int
+    ): ShortArray {
+        // number of pcm samples for durationMs at the given sampleRate
+        // example: 240ms at 44100 Hz -> 0.240 * 44100 ≈ 10584 samples
+        val totalSamples = ((durationMs / 1000.0) * sampleRate).toInt().coerceAtLeast(1)
+
+        // fade in and fade out length in samples to reduce clicks at start and end
+        // 0.02s == 20ms, clamped so fades never exceed half of the buffer
+        val fadeSamples = (sampleRate * 0.04).toInt().coerceAtLeast(1).coerceAtMost(totalSamples / 2)
+
+        // precompute 2πf so inside the loop only multiply by time
+        val twoPiF = 2.0 * Math.PI * frequencyHz
+
+        // 16-bit mono pcm buffer, values will be in [-32768, 32767]
+        val buffer = ShortArray(totalSamples)
+
+        for (i in 0 until totalSamples) {
+            // time of this sample in seconds
+            val t = i.toDouble() / sampleRate
+
+            // base amplitude to avoid clipping
+            var amplitude = 0.35
+
+            // apply a simple fade at the start and end
+            // smooth volume ramp/descent over time
+            if (i < fadeSamples) {
+                amplitude *= i.toDouble() / fadeSamples
+            } else if (i > totalSamples - fadeSamples) {
+                amplitude *= (totalSamples - i).toDouble() / fadeSamples
+            }
+
+            // generate sine wave and scale to 16-bit range
+            val sample = (sin(twoPiF * t) * amplitude * Short.MAX_VALUE).toInt()
+            buffer[i] = sample.toShort()
+        }
+
+        return buffer
+    }
+
     private fun saveStateToSavedHandle() {
         savedStateHandle[KEY_GAME_SEQUENCE] = gameSequence.joinToString(separator = "")
         savedStateHandle[KEY_USER_SEQUENCE] = userSequence.joinToString(separator = "")
@@ -310,8 +492,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         savedStateHandle[KEY_FAILED] = failed
     }
 
-    // if the presentation was in the middle of showing the sequence
-    // replay the last highlighted char after a short resume delay
+    // restore sequences and flags from saved state handle after process death
     private fun restoreStateFromSavedHandle() {
         val restoredGameSequence = savedStateHandle.get<String>(KEY_GAME_SEQUENCE).orEmpty()
         val restoredUserSequence = savedStateHandle.get<String>(KEY_USER_SEQUENCE).orEmpty()
@@ -339,6 +520,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         pauseFlow.value = isGamePaused
         isNavigatingToScore = false
 
+        // rewind to last highlight step so resume replays the last lit tile
         val adjustedStartStep = when {
             totalSteps == 0 -> 0
             presentationStep >= totalSteps -> totalSteps
@@ -347,6 +529,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         }
         presentationStep = adjustedStartStep
 
+        // resume presentation only when the last run was mid-playback
         if (restoredWasPresenting && isGameActive && !failed && gameSequence.isNotEmpty() && presentationStep < totalSteps) {
             presentSequence(presentationStep, RESUME_PRESENTATION_DELAY_MS)
         } else {
@@ -358,6 +541,8 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
 @Composable
 fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel, onNavigateToScore: () -> Unit) {
+    // intercept back to finish the game and navigate to score screen
+    // prevents the default nav back stack pop while a run is active
     BackHandler {
         onNavigateToScore()
     }

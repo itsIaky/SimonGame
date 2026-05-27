@@ -99,7 +99,22 @@
 
 - **DetailScreen**
 
-## Portrait/Landscape structure:
+## Portrait structure:
+
+```
+ ┌──────────────────────────────────┐
+ │         Game Details             │ ← Title
+ ├──────────────────────────────────┤
+ │ Max correct sequence: ...        │
+ │ Error position: ...              │
+ │ Game sequence:                   │
+ │   ....                           │
+ │ User sequence:                   │
+ │   ....                           │
+ └──────────────────────────────────┘
+```
+
+## Landscape structure:
 
 ```
  ┌──────────────────────────────────┐

@@ -24,6 +24,7 @@ fun NavigationStack(modifier: Modifier = Modifier) {
         gameViewModel.navigationEvents.collectLatest { event ->
             when (event) {
                 GameNavigationEvent.NavigateToScore -> {
+                    // pop to score if already on the stack so back stays consistent
                     val returnedToExistingScore = navController.popBackStack(
                         route = Screen.Score.route,
                         inclusive = false
@@ -38,6 +39,8 @@ fun NavigationStack(modifier: Modifier = Modifier) {
         }
     }
 
+    // score and details rely on the default nav back behavior
+    // back from details returns to score, back from score exits the app
     NavHost(navController = navController, startDestination = Screen.Score.route) {
         composable(route = Screen.Game.route) {
             GameScreen(
