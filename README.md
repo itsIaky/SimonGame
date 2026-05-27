@@ -4,7 +4,7 @@
 - Virtual device (not tested on a physical device)
 - Medium phone
 - Android 16 ("Baklava") arm64
-- API level 36 (minSdk 24+)
+- targetSdk 36, minSdk 24
 
 # Used libraries:
 
@@ -14,14 +14,24 @@
 - Lifecycle ViewModel Compose
 
 ## Persistence (Database)
-- Room Runtime
+- Room Runtime (RoomDatabase, DAO base classes, query execution, migrations support, etc... used at runtime)
 - Room KTX
-- Room Compiler (via KSP)
+- Room Compiler (via KSP, at build time it reads your @Database, @Dao, @Entity and generates implementation classes)
+- KSP (the engine/plugin that runs symbol processors, Room Compiler is one of those processors)
 
 ## Android core/runtime
 - Core KTX
 - Lifecycle Runtime KTX
 - Activity Compose
+
+## Audio (tones)
+- presentation timings and tones are inspired by: https://www.waitingforfriday.com/?p=586
+- tones are generated at runtime as 16-bit mono PCM and played with `AudioTrack`
+- tone frequencies are chosen to be easier to reproduce on typical phone speakers (they are different from the original)
+- note set is based on the C major pentatonic scale (Do–Re–Mi–Sol–La / C–D–E–G–A)
+- each tile tone is a sine wave `sin(2πft)` with a short fade in/out to reduce crackling
+- losing tone is played on wrong user input for 1.5s
+- occasional crackle/buzz at the start is most likely an emulator audio issue
 
 ## App flow
 
@@ -55,9 +65,9 @@
 
 ## Views
 
-- **GameScreen**
+### **GameScreen**
 
-## Landscape structure:
+- Landscape structure:
 
 ```
   ┌──────────────────────────────┐
@@ -70,40 +80,40 @@
   └──────────────────────────────┘
 ```
 
-## Portrait structure:
+- Portrait structure:
 
 ```
  ┌──────────────┐
- │  GameMatrix  │ ← 4/5 of space
+ │  GameMatrix  │
  ├──────────────┤
- │Sequence Text │ ← 1/5 of space
+ │Sequence Text │
  ├──────────────┤
- │ GameButtons  │ ← Bottom
+ │ GameButtons  │
  └──────────────┘
 ```
 
-- **ScoreScreen**
+### **ScoreScreen**
 
-## Portrait/Landscape structure:
+- Portrait/Landscape structure:
 
 ```
  ┌──────────────────────┐
- │     Played Games     │ ← Title
+ │     Played Games     │
  ├──────────────────────┤
- │      ScoreList       │ ← scrollable list (takes most space)
+ │      ScoreList       │
  │   (played games)     │
  ├──────────────────────┤
- │      Play button     │ ← Bottom
+ │      Play button     │
  └──────────────────────┘
 ```
 
-- **DetailScreen**
+### **DetailScreen**
 
-## Portrait structure:
+- Portrait structure:
 
 ```
  ┌──────────────────────────────────┐
- │         Game Details             │ ← Title
+ │         Game Details             │
  ├──────────────────────────────────┤
  │ Max correct sequence: ...        │
  │ Error position: ...              │
@@ -114,11 +124,11 @@
  └──────────────────────────────────┘
 ```
 
-## Landscape structure:
+- Landscape structure:
 
 ```
  ┌──────────────────────────────────┐
- │         Game Details             │ ← Title
+ │         Game Details             │
  ├──────────────────────────────────┤
  │ Max correct sequence: ...        │
  │ Error position: ...              │

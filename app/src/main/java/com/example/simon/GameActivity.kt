@@ -93,6 +93,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     private var playbackJob: Job? = null
     private var inputFlashJob: Job? = null
     private val toneTracks: Map<Char, AudioTrack> = buildToneTracks()
+    private val loseToneTrack: AudioTrack = createToneTrack(LOSE_TONE_FREQUENCY_HZ, LOSE_TONE_DURATION_MS)
 
     // internal event bus for one-off navigation events
     private val _navigationEvents = MutableSharedFlow<GameNavigationEvent>(extraBufferCapacity = 1)
@@ -113,6 +114,8 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         private const val RESUME_PRESENTATION_DELAY_MS = 350L
         private const val TONE_SAMPLE_RATE = 44100
         private const val TONE_DURATION_MS = 420
+        private const val LOSE_TONE_FREQUENCY_HZ = 220.0
+        private const val LOSE_TONE_DURATION_MS = 1500
         private const val NEXT_SEQUENCE_DELAY_MS = 800L
         private const val USER_INPUT_FLASH_MS = 420L
     }
@@ -123,6 +126,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     override fun onCleared() {
         toneTracks.values.forEach { track -> track.release() }
+        loseToneTrack.release()
         super.onCleared()
     }
 
@@ -185,6 +189,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
         isGameActive = false
         failed = true
+        playLoseTone()
         saveStateToSavedHandle()
     }
 
@@ -355,9 +360,14 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
         track.play()
     }
 
+    private fun playLoseTone() {
+        stopAllTonesForRestart()
+        loseToneTrack.playbackHeadPosition = 0
+        loseToneTrack.play()
+    }
+
     // these two methods converge to the same final state
     // sometimes when playing the tones some time I hear crackling noise (only tested on emulator)
-    // this seems to happen more with the function track.pause() and less with track.stop()
 
     // one meaningful difference, that I found, are:
     // 1) hardware resources
@@ -365,7 +375,7 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     // - stop "releases hardware for others to use"
     // 2) data in the buffer
     // - pause "keeps the data in the buffer"
-    // - stop "continues playing the rest of the written buffer unless cleared"
+    // - stop "continues playing the rest of the written buffer unless cleared" <- in MODE_STREAM so should not be in this case
 
     // from the AudioTrack stop() documentation:
     // https://developer.android.com/reference/android/media/AudioTrack.html#stop()
@@ -373,11 +383,14 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
 
     // found a similar issue here:
     // https://stackoverflow.com/questions/22422234/audiotrack-flush-causing-static
+
+    // all of this seems unlikely, the only other thing I can think of is that the emulator's audio
+    // implementation is just buggy and behaves differently from real devices
     private fun stopAllTonesForRestart() {
-        toneTracks.values.forEach { track ->
+        (toneTracks.values + loseToneTrack).forEach { track ->
             if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                //track.pause()
-                track.stop()
+                track.pause()
+                //track.stop()
             }
             track.flush()
             track.playbackHeadPosition = 0
@@ -385,10 +398,10 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     }
 
     private fun stopAllTonesNow() {
-        toneTracks.values.forEach { track ->
+        (toneTracks.values + loseToneTrack).forEach { track ->
             if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                //track.pause()
-                track.stop()
+                track.pause()
+                //track.stop()
             }
             track.flush()
             track.playbackHeadPosition = 0
@@ -407,9 +420,16 @@ class GameViewModel(application: Application, private val savedStateHandle: Save
     }
 
     private fun createToneTrack(frequencyHz: Double): AudioTrack {
+        return createToneTrack(frequencyHz, TONE_DURATION_MS)
+    }
+
+    private fun createToneTrack(
+        frequencyHz: Double,
+        durationMs: Int
+    ): AudioTrack {
         val buffer = generateToneBuffer(
             frequencyHz = frequencyHz,
-            durationMs = TONE_DURATION_MS,
+            durationMs = durationMs,
             sampleRate = TONE_SAMPLE_RATE
         )
         val minSize = AudioTrack.getMinBufferSize(
