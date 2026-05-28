@@ -2,8 +2,8 @@
 
 # Development device information:
 - Virtual device (not tested on a physical device)
-- Medium phone
-- Android 16 ("Baklava") arm64
+- Device profile: Medium Phone
+- Android 16 ("Baklava"), API 36, ABI arm64-v8a
 - targetSdk 36, minSdk 24
 
 # Used libraries:
